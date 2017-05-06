@@ -11,20 +11,18 @@
 #define FALSE 0
 #define TRUE !FALSE
 #define USE_BIT 2
-#define ALLOCATED_BIT 0
+#define REQUEST_BIT 0
 #define DIRTY_BIT 1
 #define SET_SNGL_BIT(var,pos)     ( var |= (1 << (pos%32)) )
 #define CLEAR_SNGL_BIT(var,pos)   ( var &= ~(1 << (pos%32)) )
 #define CHECK_SNGL_BIT(var,pos) ( var >> (pos%32) & 1)
 
-typedef struct page{
-	int rel_addr;
-} page_t;
+
 
 typedef struct user_mem_space{
     pid_t user_pid;
     unsigned short int flags;
-    struct page pages[32];
+    unsigned short int pages[32];
 } user_mem_space_t;
 
 typedef struct queue_msg{

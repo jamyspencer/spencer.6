@@ -8,6 +8,7 @@
 #include <sys/shm.h>
 #include <sys/msg.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include "obj.h"
 #include "timespeclib.h"
 
@@ -31,9 +32,6 @@ int main ( int argc, char *argv[] ){
 	//handle args or shutdown with error msg
 	if (argc < 2){
 		perror("Error: User process received too few arguments");
-   //     printf("%s\n", argv[0]);
-        //printf("%s\n", argv[1]);
-       // printf("%s\n", argv[2]);
         return 1;
 	}else{
 		max_time_next_rsrc_op = atoi(argv[1]);
@@ -41,15 +39,18 @@ int main ( int argc, char *argv[] ){
 
     //Attach message queues
     MsgQueueAttach(msgQueues);
+    int mem_req_quan = 0;
     int clock_lock = msgQueues[0];
-    int page_lock = msgQueues[1];
-    msg_t clock_key;
-    clock_key.mtype = 1;
     int table_lock = msgQueues[1];
+    msg_t clock_key;
     msg_t table_key;
+    clock_key.mtype = 1;
     table_key.mtype = 1;
 
-    srand(my_pid);
+    struct timespec temp;
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &temp);
+    srand((unsigned int) temp.tv_nsec);
+
     struct timespec next_terminate_check = randTime(0, MAX_TIME_NEXT_TERM_CHECK);
 	struct timespec next_resource_change = randTime(0, max_time_next_rsrc_op);
 
@@ -72,9 +73,9 @@ int main ( int argc, char *argv[] ){
         perror("msgrcv");
     }
     for (int i = 0; i < 32; i++){
-        my_page_table.pages[i].rel_addr = i;
+        my_page_table.pages[i] = 0;
     }
-    printf("time after attach:%02lu:%09lu\n", user_clock->tv_sec, user_clock->tv_nsec);
+  //  printf("time after attach:%02lu:%09lu\n", user_clock->tv_sec, user_clock->tv_nsec);
 
     if ((msgsnd(table_lock, &table_key, sizeof(msg_t), 0)) == -1){
         perror("msgsnd");
@@ -82,21 +83,39 @@ int main ( int argc, char *argv[] ){
 
 
 	while (is_doing){
-		//check if waiting on resources
+        //decide which page to send a memory request for
+        if((msgrcv(table_lock, &table_key, sizeof(msg_t), 1, 0)) ==-1){
+            perror("msgrcv");
+        }
+        mem_req_quan++;
+        i = rand() % 32;
+        SET_SNGL_BIT(my_page_table.pages[i], REQUEST_BIT);
+        SET_SNGL_BIT(my_page_table.pages[i], USE_BIT);
+        SET_SNGL_BIT(my_page_table.flags, REQUEST_BIT);
+        //set dirty bit if there is a write
+        if (rand() % 2 == 1){
+            SET_SNGL_BIT(my_page_table.pages[i], DIRTY_BIT);
+        }
+
+        printf("REQUESTS for %d:\n", my_pid);
+        for (i = 0; i < 32; i++){
+            if (CHECK_SNGL_BIT(my_page_table.pages[i], REQUEST_BIT)){
+                printf("page %d\n", i);
+            }
+        }
+        if ((msgsnd(table_lock, &table_key, sizeof(msg_t), 0)) == -1){
+            perror("msgsnd");
+        }
+
+        //update clock
         if((msgrcv(clock_lock, &clock_key, sizeof(msg_t), 1, 0)) ==-1){
             perror("msgrcv");
         }
-        printf("time on iterate:%02lu:%09lu\n", user_clock->tv_sec, user_clock->tv_nsec);
         if ((msgsnd(clock_lock, &clock_key, sizeof(msg_t), 0)) == -1){
             perror("msgsnd");
         }
 
-		if (TRUE) {
-//               printf("clock-before:%02lu%09lu vs change:%02lu%09lu\n", user_clock->tv_sec, user_clock->tv_sec, next_resource_change.tv_sec, next_resource_change.tv_nsec);
 
-			plusEqualsTimeSpecs(&next_resource_change, randTime(0, MAX_TIME_NEXT_TERM_CHECK));
-
-		}
 
 		if (is_terminating()) {
 			is_doing = FALSE;
@@ -116,7 +135,7 @@ int main ( int argc, char *argv[] ){
 
 int is_terminating (){
 	int cmpr = rand() % 100 + 1;
-	if (cmpr > CHANCE_OF_TERMINATION){
+	if (cmpr < CHANCE_OF_TERMINATION){
 		return TRUE;
 	}
 	return FALSE;

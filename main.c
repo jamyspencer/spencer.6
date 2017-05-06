@@ -104,7 +104,7 @@ int main ( int argc, char *argv[] ){
 		}
 	}
 	
-	alarm(max_run_time);
+//	alarm(max_run_time);
 
 	//clear log file
 	FILE* file_write = fopen(file_name, "w+");
@@ -148,8 +148,9 @@ int main ( int argc, char *argv[] ){
 	sys_clock->tv_nsec = 0;
 	for (i = 0; i < MAX_USERS; i++){
 		active_user_table[i].user_pid = 0;
+        active_user_table[i].flags = 0;
         for (j = 0; j < 32; j++) {
-            active_user_table[i].pages[j].rel_addr = 0;
+            active_user_table[i].pages[j] = 0;
         }
 	}
 
@@ -184,6 +185,23 @@ int main ( int argc, char *argv[] ){
 			(mystats.child_count)++;
 			addLongToTimespec(rand() % MAX_SPAWN_DELAY + 1, &when_next_fork);
 		}
+
+        if((msgrcv(table_lock, &table_key, sizeof(msg_t), 1, 0)) ==-1){
+            perror("msgrcv");
+        }
+        //Handle the memory allocation
+        for (i = 0; i < MAX_USERS; i++){
+            if (CHECK_SNGL_BIT(active_user_table[i].flags, REQUEST_BIT)){
+                for (j = 0; j < 32; j++){
+                    if (CHECK_SNGL_BIT(active_user_table[i].pages[j], REQUEST_BIT)){
+                        printf("found page request for %d", active_user_table[i].user_pid);
+                    }
+                }
+            }
+        }
+        if ((msgsnd(table_lock, &table_key, sizeof(msg_t), 0)) == -1){
+            perror("msgsnd");
+        }
         //logging
         for (i = 0; i < 20; i++){
             Log(file_name, chr_buf);
@@ -226,13 +244,14 @@ void AlarmHandler(){
 void AbortProc(){
     int i;
 	KillUsers(user_list);
-    for (i = 0; i < 3; i++){
-        msgctl(msgQueues[i], IPC_RMID, NULL);
-    }
+
 	shmdt(active_user_table );
 	shmdt(sys_clock);
 	shmctl(shmid[1], IPC_RMID, NULL);
 	shmctl(shmid[0], IPC_RMID, NULL);
 	kill(0, 2);
+    for (i = 0; i < 3; i++){
+        msgctl(msgQueues[i], IPC_RMID, NULL);
+    }
 	exit(1);
 }
